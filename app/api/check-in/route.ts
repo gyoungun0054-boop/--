@@ -1,12 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { z } from "zod";
+import { checkInRequestSchema } from "@/lib/check-in/schema";
 
 export const runtime = "nodejs";
-
-const requestSchema = z.object({
-  participantCode: z.string().trim().min(1).max(512),
-});
 
 type ParticipantRow = {
   id: string;
@@ -36,7 +32,7 @@ export async function POST(request: Request) {
     return errorResponse(400, "INVALID_INPUT", "요청 형식이 올바르지 않습니다.");
   }
 
-  const parsed = requestSchema.safeParse(rawBody);
+  const parsed = checkInRequestSchema.safeParse(rawBody);
   if (!parsed.success) {
     return errorResponse(400, "INVALID_INPUT", "참가자 코드를 입력해 주세요.");
   }
@@ -76,12 +72,16 @@ export async function POST(request: Request) {
 
   if (insertError) {
     if (insertError.code === "23505") {
-      const { data: existing } = await supabase
+      const { data: existing, error: existingError } = await supabase
         .from("check_ins")
         .select("checked_in_at")
         .eq("event_id", eventId)
         .eq("participant_id", participant.id)
         .maybeSingle<{ checked_in_at: string }>();
+
+      if (existingError) {
+        return errorResponse(500, "SERVER_ERROR", "기존 입장 기록을 확인하지 못했습니다.");
+      }
 
       return NextResponse.json(
         {
