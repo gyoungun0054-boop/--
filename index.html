@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NEXUS QR Check-in</title>
+  <style>
+    :root { color-scheme: light; --ink:#182230; --muted:#667085; --line:#e4e7ec; --blue:#2457d6; --green:#067647; --red:#b42318; --bg:#f6f8fb; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; }
+    header { background:#101828; color:white; padding:22px 18px; }
+    header .wrap, main { width:min(100% - 32px, 960px); margin:auto; }
+    .eyebrow { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:#b2ccff; font-weight:700; }
+    h1 { margin:6px 0 4px; font-size:clamp(24px,4vw,34px); }
+    header p { margin:0; color:#d0d5dd; }
+    main { padding:24px 0 40px; display:grid; gap:18px; }
+    .card { background:white; border:1px solid var(--line); border-radius:16px; padding:20px; box-shadow:0 2px 5px #10182808; }
+    h2 { font-size:18px; margin:0 0 14px; }
+    .hint { color:var(--muted); font-size:14px; line-height:1.55; }
+    .scan-row { display:flex; gap:10px; }
+    input { width:100%; min-width:0; border:1px solid #d0d5dd; border-radius:10px; padding:13px 14px; font:inherit; outline:none; }
+    input:focus { border-color:var(--blue); box-shadow:0 0 0 3px #2457d61c; }
+    button { border:0; border-radius:10px; background:var(--blue); color:white; padding:12px 18px; font:inherit; font-weight:700; cursor:pointer; white-space:nowrap; }
+    button.secondary { background:#eef2ff; color:#243b80; }
+    button:focus-visible { outline:3px solid #84adff; outline-offset:2px; }
+    .status { display:none; margin-top:14px; padding:14px; border-radius:10px; font-weight:600; line-height:1.5; }
+    .status.success { display:block; color:var(--green); background:#ecfdf3; border:1px solid #abefc6; }
+    .status.error { display:block; color:var(--red); background:#fef3f2; border:1px solid #fecdca; }
+    .status.info { display:block; color:#344054; background:#f2f4f7; border:1px solid var(--line); }
+    .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    .stat { padding:14px; border:1px solid var(--line); border-radius:12px; }
+    .stat span { display:block; color:var(--muted); font-size:13px; }
+    .stat strong { display:block; margin-top:4px; font-size:25px; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th,td { padding:12px 10px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+    th { color:var(--muted); font-weight:600; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:700; background:#f2f4f7; color:#475467; }
+    .pill.in { color:var(--green); background:#dcfae6; }
+    .toolbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+    @media (max-width:560px) { .scan-row { flex-direction:column; } .scan-row button { width:100%; } .stats { grid-template-columns:1fr; } .stat { display:flex; justify-content:space-between; align-items:center; } .stat strong { margin:0; } }
+  </style>
+</head>
+<body>
+  <header><div class="wrap">
+    <div class="eyebrow">NEXUS EVENT PLATFORM</div>
+    <h1>QR Check-in</h1>
+    <p>참가자 확인 · 중복 입장 방지 · 입장 시각 기록</p>
+  </div></header>
+  <main>
+    <section class="card" aria-labelledby="checkin-title">
+      <h2 id="checkin-title">참가자 입장 확인</h2>
+      <p class="hint">QR 코드에 담긴 참가자 ID를 입력하거나 QR 리더기로 입력창에 전송하세요. 데모 참가자 ID: <b>NEXUS-1001</b>, <b>NEXUS-1002</b>, <b>NEXUS-1003</b>.</p>
+      <form id="checkin-form">
+        <div class="scan-row">
+          <input id="qr-input" name="qr" autocomplete="off" autofocus placeholder="QR 코드 / 참가자 ID 입력" aria-label="QR 코드 또는 참가자 ID" required>
+          <button type="submit">입장 확인</button>
+        </div>
+      </form>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+    </section>
+    <section class="card">
+      <h2>입장 현황</h2>
+      <div class="stats">
+        <div class="stat"><span>전체 참가자</span><strong id="total-count">3</strong></div>
+        <div class="stat"><span>입장 완료</span><strong id="checked-count">0</strong></div>
+        <div class="stat"><span>미입장</span><strong id="pending-count">3</strong></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="toolbar"><h2 style="margin:0">참가자 목록</h2><button class="secondary" id="export-btn" type="button">CSV 내보내기</button></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>참가자 ID</th><th>이름</th><th>상태</th><th>입장 시각</th></tr></thead>
+          <tbody id="participants-body"></tbody>
+        </table>
+      </div>
+      <p class="hint">현재 버전은 브라우저 로컬 저장소에 데모 데이터를 저장합니다. 실제 행사에 적용하려면 서버 참가자 데이터 및 인증 API와 연결해야 합니다.</p>
+    </section>
+  </main>
+  <script>
+    const initialParticipants = [
+      { id: "NEXUS-1001", name: "김민준" },
+      { id: "NEXUS-1002", name: "이서연" },
+      { id: "NEXUS-1003", name: "박지호" }
+    ];
+    const STORAGE_KEY = "nexus-qr-checkin-v1";
+    let participants;
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      participants = Array.isArray(saved) ? saved : initialParticipants.map(p => ({ ...p, checkedInAt: null }));
+    } catch {
+      participants = initialParticipants.map(p => ({ ...p, checkedInAt: null }));
+    }
+
+    const form = document.getElementById("checkin-form");
+    const input = document.getElementById("qr-input");
+    const statusBox = document.getElementById("status");
+    const body = document.getElementById("participants-body");
+
+    function persist() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(participants)); } catch {}
+    }
+    function showStatus(type, message) {
+      statusBox.className = "status " + type;
+      statusBox.textContent = message;
+    }
+    function formatTime(value) {
+      if (!value) return "—";
+      return new Intl.DateTimeFormat("ko-KR", { dateStyle:"medium", timeStyle:"medium" }).format(new Date(value));
+    }
+    function render() {
+      body.replaceChildren();
+      participants.forEach(p => {
+        const tr = document.createElement("tr");
+        [p.id, p.name].forEach(value => {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        });
+        const stateTd = document.createElement("td");
+        const pill = document.createElement("span");
+        pill.className = "pill" + (p.checkedInAt ? " in" : "");
+        pill.textContent = p.checkedInAt ? "입장 완료" : "미입장";
+        stateTd.appendChild(pill);
+        tr.appendChild(stateTd);
+        const timeTd = document.createElement("td");
+        timeTd.textContent = formatTime(p.checkedInAt);
+        tr.appendChild(timeTd);
+        body.appendChild(tr);
+      });
+      const checked = participants.filter(p => p.checkedInAt).length;
+      document.getElementById("total-count").textContent = participants.length;
+      document.getElementById("checked-count").textContent = checked;
+      document.getElementById("pending-count").textContent = participants.length - checked;
+    }
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const raw = input.value.trim();
+      if (!raw) {
+        showStatus("error", "QR 코드 또는 참가자 ID를 입력해 주세요.");
+        input.focus();
+        return;
+      }
+      // Accept either a plain ID or a JSON QR payload containing participantId / id.
+      let id = raw;
+      try {
+        const payload = JSON.parse(raw);
+        if (payload && typeof payload === "object") id = String(payload.participantId || payload.id || raw).trim();
+      } catch {}
+      const participant = participants.find(p => p.id.toLowerCase() === id.toLowerCase());
+      if (!participant) {
+        showStatus("error", "등록되지 않은 참가자입니다. QR 코드와 참가자 등록 정보를 확인해 주세요.");
+      } else if (participant.checkedInAt) {
+        showStatus("error", participant.name + "님은 이미 입장 처리되었습니다. 입장 시각: " + formatTime(participant.checkedInAt));
+      } else {
+        participant.checkedInAt = new Date().toISOString();
+        persist();
+        render();
+        showStatus("success", "입장 확인 완료! " + participant.name + "님, 입장이 기록되었습니다. (" + formatTime(participant.checkedInAt) + ")");
+      }
+      input.value = "";
+      input.focus();
+    });
+    document.getElementById("export-btn").addEventListener("click", () => {
+      const rows = [["참가자 ID","이름","상태","입장 시각"], ...participants.map(p => [p.id,p.name,p.checkedInAt ? "입장 완료" : "미입장",formatTime(p.checkedInAt)])];
+      const csv = "\uFEFF" + rows.map(row => row.map(cell => '"' + String(cell).replace(/"/g, '""') + '"').join(",")).join("\r\n");
+      const url = URL.createObjectURL(new Blob([csv], { type:"text/csv;charset=utf-8;" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = "nexus-checkin.csv"; a.click();
+      URL.revokeObjectURL(url);
+    });
+    render();
+  </script>
+</body>
+</html>
