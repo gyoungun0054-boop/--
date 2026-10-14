@@ -50,14 +50,7 @@ export default function CheckInDashboard() {
 
   function handleScan(decoded: string) {
     setCode(decoded);
-    setResult({
-      id: `scan-${Date.now()}`,
-      participantCode: decoded,
-      participantName: "확인 전",
-      status: "ERROR",
-      message: "QR 코드를 읽었습니다. 입장 확인 버튼을 눌러 참가자 등록 여부를 확인하세요.",
-      checkedInAt: new Date().toISOString(),
-    });
+    setResult(null);
     inputRef.current?.focus();
   }
 
@@ -116,7 +109,7 @@ export default function CheckInDashboard() {
               <div className={styles.resultIcon} aria-hidden="true">{result.status === "SUCCESS" ? "✓" : result.status === "ERROR" ? "i" : "!"}</div>
               <div>
                 <h3 className={styles.resultTitle}>{statusLabels[result.status]}</h3>
-                <p className={styles.resultText}>{result.participantName !== "확인 불가" && result.participantName !== "확인 전" ? `${result.participantName} · ` : ""}{result.message}</p>
+                <p className={styles.resultText}>{result.participantName !== "확인 불가" ? `${result.participantName} · ` : ""}{result.message}</p>
                 <p className={styles.timestamp}>처리 시각: {formatTime(result.checkedInAt)}</p>
               </div>
             </div>
