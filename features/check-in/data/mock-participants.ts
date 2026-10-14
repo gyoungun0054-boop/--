@@ -1,4 +1,4 @@
-import type { CheckInLog, Participant } from "@/types/check-in";
+import type { CheckInLog, Participant } from "../../../types/check-in";
 
 /**
  * Fake attendees for local UI validation only. Do not replace these with real
