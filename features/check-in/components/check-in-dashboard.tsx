@@ -4,7 +4,7 @@ import { FormEvent, useMemo, useRef, useState } from "react";
 import QRCodeScanner from "@/components/qr-code-scanner";
 import type { CheckInLog, CheckInStatus } from "@/types/check-in";
 import { mockParticipants, mockRecentLogs } from "../data/mock-participants";
-import { processMockCheckIn } from "../services/mock-check-in-service";
+import { normalizeParticipantCode, processMockCheckIn } from "../services/mock-check-in-service";
 import styles from "./check-in-dashboard.module.css";
 
 const statusLabels: Record<CheckInStatus, string> = {
@@ -13,6 +13,7 @@ const statusLabels: Record<CheckInStatus, string> = {
   NOT_FOUND: "미등록 참가자",
   ERROR: "확인 오류",
 };
+const liveMode = process.env.NEXT_PUBLIC_CHECKIN_MODE === "live";
 
 function formatTime(value: string) {
   const date = new Date(value);
@@ -28,8 +29,9 @@ function badgeClass(status: CheckInStatus) {
 
 export default function CheckInDashboard() {
   const [code, setCode] = useState("");
-  const [logs, setLogs] = useState<CheckInLog[]>(mockRecentLogs);
+  const [logs, setLogs] = useState<CheckInLog[]>(liveMode ? [] : mockRecentLogs);
   const [result, setResult] = useState<CheckInLog | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const checkedInCodes = useMemo(
@@ -39,13 +41,64 @@ export default function CheckInDashboard() {
   const successCount = logs.filter((log) => log.status === "SUCCESS").length;
   const failureCount = logs.filter((log) => log.status !== "SUCCESS").length;
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const processed = processMockCheckIn(code, mockParticipants, checkedInCodes);
-    setResult(processed.log);
-    setLogs((current) => [processed.log, ...current].slice(0, 12));
-    if (processed.status === "SUCCESS") setCode("");
-    inputRef.current?.focus();
+    if (submitting) return;
+    setSubmitting(true);
+
+    try {
+      let log: CheckInLog;
+      if (liveMode) {
+        const participantCode = normalizeParticipantCode(code);
+        const response = await fetch("/api/check-in", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ participantCode }),
+        });
+        const payload = await response.json().catch(() => ({})) as {
+          ok?: boolean;
+          code?: string;
+          message?: string;
+          participantName?: string;
+          checkedInAt?: string | null;
+        };
+        const status: CheckInStatus = response.ok
+          ? "SUCCESS"
+          : payload.code === "ALREADY_CHECKED_IN"
+            ? "ALREADY_CHECKED_IN"
+            : payload.code === "NOT_FOUND"
+              ? "NOT_FOUND"
+              : "ERROR";
+        log = {
+          id: `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          participantCode: participantCode || "(빈 코드)",
+          participantName: payload.participantName ?? (status === "NOT_FOUND" ? "확인 불가" : "참가자"),
+          status,
+          message: payload.message ?? (response.ok ? "입장 확인 완료" : "서버에서 입장을 확인하지 못했습니다."),
+          checkedInAt: payload.checkedInAt ?? new Date().toISOString(),
+        };
+      } else {
+        log = processMockCheckIn(code, mockParticipants, checkedInCodes).log;
+      }
+
+      setResult(log);
+      setLogs((current) => [log, ...current].slice(0, 12));
+      if (log.status === "SUCCESS") setCode("");
+    } catch {
+      const log: CheckInLog = {
+        id: `network-error-${Date.now()}`,
+        participantCode: normalizeParticipantCode(code) || "(빈 코드)",
+        participantName: "확인 불가",
+        status: "ERROR",
+        message: "서버에 연결할 수 없습니다. 네트워크와 서버 설정을 확인해 주세요.",
+        checkedInAt: new Date().toISOString(),
+      };
+      setResult(log);
+      setLogs((current) => [log, ...current].slice(0, 12));
+    } finally {
+      setSubmitting(false);
+      inputRef.current?.focus();
+    }
   }
 
   function handleScan(decoded: string) {
@@ -74,7 +127,7 @@ export default function CheckInDashboard() {
       <section className={styles.stats} aria-label="입장 처리 요약">
         <div className={styles.stat}><p className={styles.statLabel}>입장 성공 기록</p><p className={styles.statValue}>{successCount}</p></div>
         <div className={styles.stat}><p className={styles.statLabel}>확인/실패 기록</p><p className={styles.statValue}>{failureCount}</p></div>
-        <div className={styles.stat}><p className={styles.statLabel}>테스트 참가자</p><p className={styles.statValue}>{mockParticipants.filter((item) => item.isActive).length}명</p></div>
+        <div className={styles.stat}><p className={styles.statLabel}>{liveMode ? "처리 기록" : "테스트 참가자"}</p><p className={styles.statValue}>{liveMode ? logs.length : mockParticipants.filter((item) => item.isActive).length}{liveMode ? "건" : "명"}</p></div>
       </section>
 
       <div className={styles.columns}>
@@ -99,9 +152,9 @@ export default function CheckInDashboard() {
                 autoComplete="off"
                 aria-describedby="input-help"
               />
-              <button className={styles.primaryButton} type="submit">입장 확인</button>
+              <button className={styles.primaryButton} type="submit" disabled={submitting}>{submitting ? "확인 중…" : "입장 확인"}</button>
             </div>
-            <p className={styles.help} id="input-help">테스트 코드: NEXUS-001, NEXUS-002, NEXUS-003. NEXUS-004는 비활성 상태입니다.</p>
+            <p className={styles.help} id="input-help">{liveMode ? "실제 서버 모드입니다. 등록된 행사 참가자 코드만 사용할 수 있습니다." : "테스트 코드: NEXUS-001, NEXUS-002, NEXUS-003. NEXUS-004는 비활성 상태입니다."}</p>
           </form>
 
           {result && (
@@ -118,11 +171,11 @@ export default function CheckInDashboard() {
 
         <section className={styles.panel} aria-labelledby="recent-heading">
           <div className={styles.logHeader}>
-            <h2 id="recent-heading">최근 입장 기록</h2>
-            <span className={styles.logCount}>최대 12건 표시</span>
+            <h2 id="recent-heading">최근 처리 기록</h2>
+            <span className={styles.logCount}>현재 화면의 최대 12건</span>
           </div>
           {logs.length === 0 ? (
-            <p className={styles.empty}>아직 입장 기록이 없습니다.</p>
+            <p className={styles.empty}>아직 처리 기록이 없습니다.</p>
           ) : (
             <ol className={styles.logList}>
               {logs.map((log) => (
@@ -137,10 +190,10 @@ export default function CheckInDashboard() {
               ))}
             </ol>
           )}
-          <div className={styles.note}>Mock Data 모드입니다. 새로고침하면 테스트 기록이 초기화되며 실제 행사 DB에는 저장되지 않습니다.</div>
+          <div className={styles.note}>{liveMode ? "실제 서버 모드입니다. 이 목록은 현재 화면에서 처리한 기록만 보여주며, 새로고침 후 전체 기록을 불러오지는 않습니다." : "Mock Data 모드입니다. 새로고침하면 테스트 기록이 초기화되며 실제 데이터베이스에는 저장되지 않습니다."}</div>
         </section>
       </div>
-      <div className={styles.note}>카메라 스캔은 브라우저 권한과 HTTPS 또는 localhost가 필요합니다. QR 인식만으로 입장 처리하지 않으며, 담당자가 확인 버튼을 눌러야 결과가 기록됩니다.</div>
+      <div className={styles.note}>카메라 스캔은 브라우저 권한과 HTTPS 또는 localhost가 필요합니다. QR 인식만으로 입장 처리하지 않으며, 담당자가 확인 버튼을 눌러야 처리됩니다.</div>
     </main>
   );
 }
