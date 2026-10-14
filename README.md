@@ -1,74 +1,80 @@
 # NEXUS QR Check-in
 
-이 저장소는 NEXUS Event Platform의 QR 입장 확인 기능을 별도로 검토하고 실행하기 위한 Next.js 시제품입니다.
+NEXUS Event Platform에서 이경운 담당 QR 입장 확인 기능을 검토하기 위한 개인 저장소 시제품입니다.
 
-> **중요:** 이 코드는 공식 팀 저장소 `paichai-nexus/nexus-event-platform`에 병합된 코드가 아닙니다. GitHub 연동 권한이 공식 저장소에서 읽기 전용으로 확인되어, 현재는 개인 저장소에서 구현 및 검토하고 있습니다.
+> **현재 상태:** 개인 저장소에서 기능 개발 중이며 공식 팀 저장소 `paichai-nexus/nexus-event-platform`에는 병합되지 않았습니다. 공식 저장소는 현재 GitHub 연결에서 읽기 권한만 확인되어 직접 푸시할 수 없습니다.
 
 ## 구현 범위
 
-- QR 리더기 또는 수동 입력을 통한 참가자 코드 수신
-- JSON QR 페이로드의 `participantCode`, `participantId`, `id` 필드 처리
-- Zod를 이용한 입력 검증
-- Supabase에 등록된 활성 참가자만 입장 처리
-- 등록되지 않은 코드, 중복 입장, 설정 오류, 서버/네트워크 오류 구분
-- 서버가 반환한 입장 시각 표시
-- 데이터베이스 UNIQUE 제약으로 동시 요청 중복 입장 방지
-- 반응형 입장 확인 화면 및 Vitest 입력 검증 테스트
+- `/admin/check-in` 관리자 입장 확인 화면
+- 카메라 QR 스캔 및 QR 리더기/직접 입력 fallback
+- 일반 텍스트 코드와 JSON QR payload(`participantCode`, `participantId`, `id`) 처리
+- 등록·활성 참가자 조회, 중복 입장 방지
+- `SUCCESS`, `ALREADY_CHECKED_IN`, `NOT_FOUND`, `ERROR` 결과 상태
+- 처리 시각 및 최근 처리 기록 UI
+- 반응형 데스크톱/모바일 레이아웃
+- Mock Data 우선 동작과 Vitest 단위 테스트
+- Supabase API 및 schema 예제
 
-## 실행 준비
+## 빠른 실행 (Mock Data UI)
 
-필요한 환경: Node.js 20 이상 권장, npm, Supabase 프로젝트.
+필요 환경: Node.js 22 권장, npm.
 
-1. 저장소를 내려받고 의존성을 설치합니다.
+```bash
+npm install
+npm run dev
+```
 
-   ```bash
-   npm install
-   ```
+브라우저에서 [http://localhost:3000/admin/check-in](http://localhost:3000/admin/check-in)을 엽니다.
 
-2. `.env.example`을 참고해 로컬 `.env.local`을 만들고 값을 설정합니다.
+테스트 코드:
+- `NEXUS-001`: 입장 성공
+- `NEXUS-002`: 이미 입장 처리된 참가자 (중복 테스트)
+- `NEXUS-003`: 이미 입장 처리된 참가자 (최근 기록에 포함)
+- `NEXUS-004`: 비활성 참가자 → 입장 거절
+- `UNKNOWN`: 등록되지 않은 참가자
 
-   ```text
-   NEXT_PUBLIC_SUPABASE_URL=Supabase 프로젝트 URL
-   SUPABASE_SERVICE_ROLE_KEY=서버 전용 서비스 역할 키
-   CHECKIN_EVENT_ID=사전에 생성한 행사 UUID
-   ```
+Mock Data는 화면 흐름 확인용입니다. 새로고침하면 기록이 초기화되고 실제 데이터베이스에는 저장되지 않습니다.
 
-   실제 키를 GitHub에 커밋하지 마세요. `SUPABASE_SERVICE_ROLE_KEY`는 서버에서만 사용하며 브라우저 코드에 노출하면 안 됩니다.
+## 실제 Supabase API 모드
 
-3. Supabase SQL Editor에서 `supabase/schema.sql`을 실행합니다. `participants`와 `check_ins` 테이블을 생성한 뒤, 행사 ID에 맞는 테스트 참가자를 별도 환경에서 등록합니다.
+1. Supabase 프로젝트를 만들고 SQL Editor에서 `supabase/schema.sql`을 적용합니다.
+2. `events` 레코드를 별도로 관리하지 않는 현재 스키마 기준으로 사용할 UUID를 정해 `participants.event_id`에 넣고, 해당 참가자 행들을 준비합니다. 이 UUID를 `CHECKIN_EVENT_ID`로 지정합니다.
+3. 로컬 `.env.local`에 다음 값을 설정합니다.
 
-4. 실행합니다.
+```dotenv
+NEXT_PUBLIC_CHECKIN_MODE=live
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVER_ONLY_SERVICE_ROLE_KEY
+CHECKIN_EVENT_ID=YOUR_EVENT_UUID
+```
 
-   ```bash
-   npm run dev
-   ```
+4. 서버를 재시작하고 `/admin/check-in`에서 등록된 참가자 코드를 테스트합니다.
 
-   브라우저에서 `http://localhost:3000`을 엽니다.
+**보안:** `SUPABASE_SERVICE_ROLE_KEY`는 서버 전용 비밀키입니다. 브라우저 변수에 넣거나 GitHub에 커밋하지 마세요. 실제 참가자 개인정보를 공개 저장소에 넣지 마세요.
 
-5. 정적 입력 검증 테스트와 타입 검사를 실행합니다.
+실제 API는 중복 입장을 DB의 unique constraint로 막습니다. 다만 UI의 최근 기록은 현재 화면에서 처리한 최대 12건만 보여주며, 새로고침 후 DB 기록을 불러오는 조회 API는 아직 없습니다. 행사 현장 운영 전에는 관리자 인증/권한 검토와 실제 데이터로 통합 테스트가 필요합니다.
 
-   ```bash
-   npm test
-   npm run typecheck
-   npm run build
-   ```
+## 검사 명령
 
-## 데이터베이스 동작
+```bash
+npm test
+npm run typecheck
+npm run build
+```
 
-- 참가자는 `event_id + participant_code` 조합으로 조회됩니다.
-- 입장 기록은 `check_ins` 테이블에 기록됩니다.
-- `UNIQUE(event_id, participant_id)` 제약으로 같은 참가자의 중복 기록을 데이터베이스가 차단합니다.
-- 입장 시각은 브라우저 시계가 아니라 데이터베이스의 `checked_in_at` 값을 사용합니다.
-- 서비스 역할 키를 쓰는 API는 서버에서만 실행됩니다.
+GitHub Actions의 `.github/workflows/qr-check-in-ci.yml`도 테스트, 타입 검사, 프로덕션 빌드를 실행합니다. 실제 결과는 [Pull Request Checks](https://github.com/gyoungun0054-boop/--/pull/1/checks)에서 확인하세요.
 
-## 현재 제한사항 / 공식 프로젝트 통합 전 확인할 것
+## 카메라 제한
 
-- 카메라 QR 스캔 UI는 포함하지 않았습니다. 요구사항 우선순위에 따라 QR 리더기 입력 및 처리 흐름을 먼저 구현했습니다.
-- 실제 행사 ID와 참가자 데이터를 구성하지 않았습니다. 공개 저장소에 실제 개인정보를 추가하지 마세요.
-- 행사 운영 전에 공식 팀의 최종 기술 스택, DB 규칙, 인증·권한 정책, 테스트 기준과 일치하는지 개발 리드의 리뷰가 필요합니다.
-- 이 데모의 API는 행사에 맞는 인증/요청 제한 정책과 운영 로그 정책을 적용한 후에만 현장 배포 대상으로 검토해야 합니다.
-- 브라우저 네트워크 오류가 나면 입장 성공으로 표시하지 않습니다. 재시도 전에는 담당자가 서버의 입장 기록을 확인해야 합니다.
+카메라 사용에는 브라우저 권한과 HTTPS 또는 `localhost`가 필요합니다. QR을 읽었다고 자동 입장 처리하지 않고, 담당자가 입장 확인 버튼을 눌러야 합니다. 카메라를 사용할 수 없으면 직접 입력 또는 키보드형 QR 리더기를 이용할 수 있습니다.
 
-## 담당 기능
+## 제출 및 배포 상태
 
-이경운 — QR Check-in: 참가자 확인, 중복 입장 방지, 성공/실패 상태, 입장 시각 기록 UI.
+- 개인 저장소 PR: 열려 있음
+- GitHub Actions 테스트 / 타입 검사 / 프로덕션 빌드: 마지막 확인 시 통과
+- 공식 NEXUS 팀 저장소 반영: 미완료 (현재 연결은 읽기 권한)
+- Supabase 프로젝트 및 행사 참가자 데이터 설정: 사용자 계정에서 설정 필요
+- 실제 카메라/모바일 브라우저 테스트: 이 환경에서 미실행
+
+현장 입장에 사용하기 전에 팀의 인증 정책, 권한 관리, DB 규칙, 감사 로그 및 운영 테스트를 확인해야 합니다.
