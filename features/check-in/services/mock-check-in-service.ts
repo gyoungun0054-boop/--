@@ -1,4 +1,4 @@
-import type { CheckInLog, CheckInResult, Participant } from "@/types/check-in";
+import type { CheckInLog, CheckInResult, Participant } from "../../../types/check-in";
 
 export function normalizeParticipantCode(value: string): string {
   const trimmed = value.trim();
